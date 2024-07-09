@@ -94,7 +94,7 @@ class LoginView(APIView):
                 
                 return Response(
                     GenerateRequestResponse(False, 403, "Account not verified. A new verification code has been sent to your email.", 
-                                            {"verification_code": verification_code}),  # Remove in production
+                                            {"verification_code": verification_code}), 
                     status=status.HTTP_403_FORBIDDEN
                 )
             
@@ -214,6 +214,89 @@ class ChangePasswordView(APIView):
                     response={"tokens": tokens}
                 ),
                 status=200
+            )
+        except Exception as e:
+            return Response(
+                GenerateRequestResponse(
+                    status=False,
+                    status_code=500,
+                    message=f"Server Error: {e}",
+                    response=None
+                ),
+                status=500
+            )
+        
+class ForgotPasswordView(APIView):
+    def post(self, request):
+        email = request.data.get('email')
+
+        try:
+            user = CustomUser.objects.get(username=email)
+
+            verification_code = get_random_string(length=6, allowed_chars='0123456789')
+            EmailVerification.objects.filter(user=user).delete()
+            EmailVerification.objects.create(user=user, code=verification_code)
+            return Response(
+                GenerateRequestResponse(
+                    status=True,
+                    status_code=200,
+                    message="Verification code sent to your email",
+                    response={"verification_code": verification_code}  # Including code in the response for now
+                )
+            )
+
+        except CustomUser.DoesNotExist:
+            return Response(
+                GenerateRequestResponse(
+                    status=False,
+                    status_code=400,
+                    message="User with this email does not exist",
+                    response=None
+                ),
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+class ResetPasswordView(APIView):
+    def post(self, request):
+        email = request.data.get('email')
+        verification_code = request.data.get('verification_code')
+        new_password = request.data.get('new_password')
+
+        try:
+            user = CustomUser.objects.get(username=email)
+            verification = EmailVerification.objects.get(user=user, code=verification_code)
+
+            if verification.is_expired:
+                return Response(
+                    GenerateRequestResponse(
+                        status=False,
+                        status_code=400,
+                        message="Verification code has expired",
+                        response=None
+                    )
+                )
+            user.is_active = True
+            user.set_password(new_password)
+            user.save()
+            verification.delete()
+
+            tokens = get_tokens_for_user(user)
+            return Response(
+                GenerateRequestResponse(
+                    status=True,
+                    status_code=200,
+                    message="Password reset successfully",
+                    response={"tokens": tokens}
+                )
+            )
+        except (CustomUser.DoesNotExist, EmailVerification.DoesNotExist):
+            return Response(
+                GenerateRequestResponse(
+                    status=False,
+                    status_code=400,
+                    message="Invalid email or verification code",
+                    response=None
+                )
             )
         except Exception as e:
             return Response(
